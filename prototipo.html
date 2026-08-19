@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WebGIS · Serviços de saúde próximos — Belo Horizonte</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+  :root{
+    --bg:#f6f7f5; --panel:#ffffff; --line:#e1e4df;
+    --ink:#1c231f; --ink-soft:#5b645d; --ink-faint:#8a938c;
+    --teal:#0f6e56; --teal-bg:#e1f5ee; --coral:#993c1d; --coral-bg:#faece7;
+    --hospital:#26215c; --hospital-bg:#eeedfe;
+    --radius:10px;
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;margin:0;font-family:"Segoe UI",Helvetica,Arial,sans-serif;color:var(--ink);background:var(--bg);}
+  .app{display:flex;height:100vh;}
+  .sidebar{
+    width:380px;min-width:340px;background:var(--panel);border-right:1px solid var(--line);
+    display:flex;flex-direction:column;overflow:hidden;
+  }
+  .sidebar-header{padding:18px 20px 14px;border-bottom:1px solid var(--line);}
+  .sidebar-header h1{font-size:16px;font-weight:600;margin:0 0 4px;}
+  .sidebar-header p{font-size:12.5px;color:var(--ink-soft);margin:0;line-height:1.5;}
+  .sidebar-body{padding:16px 20px;overflow-y:auto;flex:1;}
+  .field{margin-bottom:16px;}
+  .field label{display:block;font-size:12px;font-weight:600;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.03em;margin-bottom:6px;}
+  select, input[type=number]{
+    width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:8px;font-size:13.5px;
+    background:#fff;color:var(--ink);
+  }
+  .radius-row{display:flex;gap:8px;align-items:center;}
+  .radius-row select{flex:1;}
+  .radius-row input{width:90px;}
+  .chips{display:flex;gap:8px;flex-wrap:wrap;}
+  .chip{
+    display:flex;align-items:center;gap:6px;padding:7px 11px;border:1px solid var(--line);border-radius:20px;
+    font-size:12.5px;cursor:pointer;user-select:none;background:#fff;color:var(--ink-soft);
+  }
+  .chip input{margin:0;}
+  .chip.active-farmacia{border-color:var(--teal);background:var(--teal-bg);color:var(--teal);font-weight:600;}
+  .chip.active-laboratorio{border-color:var(--coral);background:var(--coral-bg);color:var(--coral);font-weight:600;}
+  .sort-row{display:flex;gap:8px;}
+  .sort-row button{
+    flex:1;padding:8px 6px;font-size:12.5px;border:1px solid var(--line);background:#fff;border-radius:8px;cursor:pointer;color:var(--ink-soft);
+  }
+  .sort-row button.active{background:var(--ink);color:#fff;border-color:var(--ink);}
+  .query-info{
+    background:#f2f3f0;border:1px solid var(--line);border-radius:var(--radius);padding:12px 14px;font-size:12px;
+    color:var(--ink-soft);line-height:1.6;margin-bottom:16px;
+  }
+  .query-info b{color:var(--ink);}
+  .query-info code{background:#e6e8e3;padding:1px 5px;border-radius:4px;font-size:11.5px;}
+  .results-count{font-size:12px;color:var(--ink-faint);margin:0 0 8px;}
+  .result{
+    display:flex;justify-content:space-between;gap:10px;align-items:flex-start;padding:11px 12px;border:1px solid var(--line);
+    border-radius:9px;margin-bottom:8px;cursor:pointer;background:#fff;transition:border-color .12s;
+  }
+  .result:hover{border-color:var(--ink-soft);}
+  .result.selected{border-color:var(--ink);box-shadow:0 0 0 1px var(--ink);}
+  .result .name{font-size:13.5px;font-weight:600;margin:0 0 3px;}
+  .result .addr{font-size:11.5px;color:var(--ink-faint);}
+  .result .badge{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;padding:2px 7px;border-radius:20px;display:inline-block;margin-bottom:4px;}
+  .badge.farmacia{background:var(--teal-bg);color:var(--teal);}
+  .badge.laboratorio{background:var(--coral-bg);color:var(--coral);}
+  .result .dist{font-size:12.5px;font-weight:700;color:var(--ink);white-space:nowrap;}
+  .empty{font-size:12.5px;color:var(--ink-faint);padding:14px;text-align:center;border:1px dashed var(--line);border-radius:9px;}
+  #map{flex:1;}
+  .leaflet-popup-content{font-size:12.5px;}
+  .disclaimer{font-size:10.5px;color:var(--ink-faint);padding:10px 20px;border-top:1px solid var(--line);line-height:1.5;}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <h1>Serviços de saúde próximos</h1>
+      <p>Protótipo WebGIS — localize farmácias e laboratórios de radiografia próximos a um hospital em Belo Horizonte.</p>
+    </div>
+    <div class="sidebar-body">
+
+      <div class="field">
+        <label for="hospital-select">Hospital de referência</label>
+        <select id="hospital-select">
+          <option value="">Selecione um hospital…</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label for="radius-select">Raio de busca</label>
+        <div class="radius-row">
+          <select id="radius-select">
+            <option value="200">200 m</option>
+            <option value="500" selected>500 m</option>
+            <option value="1000">1 km</option>
+            <option value="2000">2 km</option>
+            <option value="custom">Personalizado</option>
+          </select>
+          <input type="number" id="radius-custom" placeholder="metros" style="display:none;" min="50" step="50">
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Categoria</label>
+        <div class="chips">
+          <label class="chip active-farmacia" id="chip-farmacia">
+            <input type="checkbox" data-cat="farmacia" checked> Farmácias
+          </label>
+          <label class="chip active-laboratorio" id="chip-laboratorio">
+            <input type="checkbox" data-cat="laboratorio" checked> Laboratórios de radiografia
+          </label>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Ordenar por</label>
+        <div class="sort-row">
+          <button id="sort-distance" class="active" data-sort="distance">Proximidade</button>
+          <button id="sort-alpha" data-sort="alpha">Alfabética</button>
+        </div>
+      </div>
+
+      <div class="query-info" id="query-info">
+        Selecione um hospital para calcular a área de busca e executar a consulta espacial.
+      </div>
+
+      <p class="results-count" id="results-count"></p>
+      <div id="results-list"></div>
+    </div>
+    <div class="disclaimer">
+      Protótipo acadêmico. Hospitais correspondem a localizações aproximadas de estabelecimentos reais de Belo Horizonte; farmácias, laboratórios e o polígono de bairro são dados fictícios, criados apenas para demonstrar filtros, raio de busca e os operadores espaciais está contido / contém / intercepta.
+    </div>
+  </aside>
+  <div id="map"></div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
+<script>
+/* ---------- dados de exemplo ---------- */
+const hospitals = [
+  { id:'hc',  name:'Hospital das Clínicas (UFMG)', lat:-19.9227, lng:-43.9508 },
+  { id:'sc',  name:'Santa Casa de Misericórdia BH', lat:-19.9245, lng:-43.9345 },
+  { id:'ob',  name:'Hospital Odilon Behrens',        lat:-19.9075, lng:-43.9701 },
+  { id:'md',  name:'Hospital Mater Dei',              lat:-19.9312, lng:-43.9378 },
+];
+
+// dados fictícios de farmácias e laboratórios, distribuídos ao redor dos hospitais acima
+const facilities = [
+  { id:'f1', name:'Farmácia Bem-Estar Centro',   category:'farmacia',    addr:'R. dos Caetés, 210',        lat:-19.9241, lng:-43.9491 },
+  { id:'f2', name:'Drogaria Vida Saudável',       category:'farmacia',    addr:'Av. Afonso Pena, 1780',     lat:-19.9268, lng:-43.9382 },
+  { id:'f3', name:'Farmácia Popular Savassi',     category:'farmacia',    addr:'R. Pium-í, 542',            lat:-19.9352, lng:-43.9367 },
+  { id:'f4', name:'Drogaria São Marcos',          category:'farmacia',    addr:'R. Padre Eustáquio, 890',   lat:-19.9089, lng:-43.9685 },
+  { id:'f5', name:'Farmácia 24h Nova Suíça',      category:'farmacia',    addr:'R. Comendador Lisboa, 45',  lat:-19.9298, lng:-43.9701 },
+  { id:'l1', name:'Laboratório RadioImagem BH',   category:'laboratorio', addr:'R. Grão Pará, 660',         lat:-19.9251, lng:-43.9459 },
+  { id:'l2', name:'Clínica RaioX Diagnóstico',    category:'laboratorio', addr:'Av. do Contorno, 3300',     lat:-19.9223, lng:-43.9362 },
+  { id:'l3', name:'Centro de Radiografia Liberdade', category:'laboratorio', addr:'R. Espírito Santo, 1200', lat:-19.9198, lng:-43.9351 },
+  { id:'l4', name:'Laboratório Imagem Padre Eustáquio', category:'laboratorio', addr:'R. Dias Adorno, 300', lat:-19.9066, lng:-43.9654 },
+  { id:'l5', name:'RX Diagnósticos Gutierrez',    category:'laboratorio', addr:'R. Gustavo da Silveira, 77',lat:-19.9330, lng:-43.9411 },
+];
+
+// polígono ilustrativo de um bairro (simplificado), usado para demonstrar contém / intercepta
+const bairroPoligono = turf.polygon([[
+  [-43.9560, -19.9160],
+  [-43.9420, -19.9160],
+  [-43.9420, -19.9290],
+  [-43.9560, -19.9290],
+  [-43.9560, -19.9160],
+]], { name: 'Bairro ilustrativo (Centro-Savassi)' });
+
+/* ---------- estado ---------- */
+let state = {
+  hospitalId: null,
+  radius: 500,
+  categories: new Set(['farmacia','laboratorio']),
+  sortBy: 'distance',
+  selectedResultId: null,
+};
+
+/* ---------- mapa ---------- */
+const map = L.map('map', { zoomControl:true }).setView([-19.9227, -43.9508], 13);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '&copy; OpenStreetMap contributors', maxZoom: 19,
+}).addTo(map);
+
+let hospitalMarker = null;
+let bufferLayer = null;
+let bairroLayer = L.geoJSON(bairroPoligono, {
+  style: { color:'#8a938c', weight:1, dashArray:'4 4', fillOpacity:0.05 }
+}).addTo(map).bindTooltip('Bairro ilustrativo', { sticky:true });
+let facilityLayers = {};
+let routeLine = null;
+
+/* ---------- preencher select de hospitais ---------- */
+const hospitalSelect = document.getElementById('hospital-select');
+hospitals.forEach(h => {
+  const opt = document.createElement('option');
+  opt.value = h.id; opt.textContent = h.name;
+  hospitalSelect.appendChild(opt);
+});
+
+/* ---------- helpers ---------- */
+function currentRadiusMeters(){
+  const sel = document.getElementById('radius-select').value;
+  if (sel === 'custom'){
+    const v = parseFloat(document.getElementById('radius-custom').value);
+    return (isFinite(v) && v > 0) ? v : 500;
+  }
+  return parseFloat(sel);
+}
+
+function clearFacilityLayers(){
+  Object.values(facilityLayers).forEach(l => map.removeLayer(l));
+  facilityLayers = {};
+}
+
+function colorFor(cat){ return cat === 'farmacia' ? '#0f6e56' : '#993c1d'; }
+
+/* ---------- consulta espacial + renderização ---------- */
+function runQuery(){
+  const hospital = hospitals.find(h => h.id === state.hospitalId);
+  const infoEl = document.getElementById('query-info');
+  const listEl = document.getElementById('results-list');
+  const countEl = document.getElementById('results-count');
+
+  clearFacilityLayers();
+  if (routeLine){ map.removeLayer(routeLine); routeLine = null; }
+  if (bufferLayer){ map.removeLayer(bufferLayer); bufferLayer = null; }
+
+  if (!hospital){
+    infoEl.innerHTML = 'Selecione um hospital para calcular a área de busca e executar a consulta espacial.';
+    listEl.innerHTML = '';
+    countEl.textContent = '';
+    if (hospitalMarker){ map.removeLayer(hospitalMarker); hospitalMarker = null; }
+    return;
+  }
+
+  // marcador do hospital
+  if (hospitalMarker) map.removeLayer(hospitalMarker);
+  hospitalMarker = L.circleMarker([hospital.lat, hospital.lng], {
+    radius:9, color:'#26215c', weight:2, fillColor:'#7f77dd', fillOpacity:1
+  }).addTo(map).bindPopup(`<b>${hospital.name}</b><br>Ponto de referência`);
+  map.setView([hospital.lat, hospital.lng], 14);
+
+  // buffer (raio de busca) como polígono — entidade geográfica tipo polígono
+  const radiusM = currentRadiusMeters();
+  const hospitalPoint = turf.point([hospital.lng, hospital.lat]);
+  const buffer = turf.buffer(hospitalPoint, radiusM / 1000, { units:'kilometers' });
+  bufferLayer = L.geoJSON(buffer, { style:{ color:'#7f77dd', weight:1.5, fillOpacity:0.06 } }).addTo(map);
+
+  // consulta espacial: intercepta (polígono x polígono) — buffer x bairro ilustrativo
+  const intersectsBairro = turf.booleanIntersects(buffer, bairroPoligono);
+  const containsBairro = intersectsBairro && turf.booleanContains(bairroPoligono, buffer);
+
+  // consulta espacial: está contido (ponto x polígono) — cada estabelecimento dentro do buffer
+  const activeCats = state.categories;
+  const withinBuffer = facilities.filter(f => activeCats.has(f.category));
+  const results = withinBuffer
+    .map(f => {
+      const pt = turf.point([f.lng, f.lat]);
+      const contido = turf.booleanPointInPolygon(pt, buffer);
+      const distM = turf.distance(hospitalPoint, pt, { units:'kilometers' }) * 1000;
+      return { ...f, contido, distM };
+    })
+    .filter(f => f.contido); // operador "está contido"
+
+  // ordenação
+  results.sort((a,b) => state.sortBy === 'alpha'
+    ? a.name.localeCompare(b.name, 'pt-BR')
+    : a.distM - b.distM);
+
+  // painel de consulta espacial
+  infoEl.innerHTML = `
+    Raio de busca: <b>${radiusM} m</b> a partir de <b>${hospital.name}</b>.<br>
+    Operador <code>está contido</code>: ${results.length} estabelecimento(s) dentro do buffer.<br>
+    Operador <code>intercepta</code>: buffer × bairro ilustrativo → <b>${intersectsBairro ? 'sim' : 'não'}</b>.<br>
+    Operador <code>contém</code>: bairro ilustrativo contém o buffer inteiro → <b>${containsBairro ? 'sim' : 'não'}</b>.
+  `;
+
+  // marcadores dos resultados
+  results.forEach(f => {
+    const marker = L.circleMarker([f.lat, f.lng], {
+      radius:7, color:colorFor(f.category), weight:2, fillColor:colorFor(f.category), fillOpacity:0.85
+    }).addTo(map).bindPopup(`<b>${f.name}</b><br>${f.addr}<br>${Math.round(f.distM)} m do hospital`);
+    marker.on('click', () => selectResult(f.id));
+    facilityLayers[f.id] = marker;
+  });
+
+  // linha (entidade geográfica tipo linha): rota até o resultado mais próximo
+  if (results.length){
+    const nearest = [...results].sort((a,b) => a.distM - b.distM)[0];
+    routeLine = L.polyline([[hospital.lat, hospital.lng],[nearest.lat, nearest.lng]], {
+      color:'#1c231f', weight:2, dashArray:'6 6', opacity:0.6
+    }).addTo(map).bindTooltip(`Rota até o mais próximo (${Math.round(nearest.distM)} m)`);
+  }
+
+  // lista lateral
+  countEl.textContent = `${results.length} resultado(s) encontrado(s)`;
+  listEl.innerHTML = '';
+  if (!results.length){
+    listEl.innerHTML = `<div class="empty">Nenhum estabelecimento encontrado neste raio.<br>Tente aumentar o raio de busca.</div>`;
+    return;
+  }
+  results.forEach(f => {
+    const div = document.createElement('div');
+    div.className = 'result' + (f.id === state.selectedResultId ? ' selected' : '');
+    div.innerHTML = `
+      <div>
+        <span class="badge ${f.category}">${f.category === 'farmacia' ? 'Farmácia' : 'Laboratório'}</span>
+        <p class="name">${f.name}</p>
+        <p class="addr">${f.addr}</p>
+      </div>
+      <div class="dist">${Math.round(f.distM)} m</div>
+    `;
+    div.addEventListener('click', () => selectResult(f.id));
+    listEl.appendChild(div);
+  });
+}
+
+function selectResult(id){
+  state.selectedResultId = id;
+  const f = facilities.find(x => x.id === id);
+  if (f){
+    map.flyTo([f.lat, f.lng], 16, { duration:0.6 });
+    if (facilityLayers[id]) facilityLayers[id].openPopup();
+  }
+  runQuery();
+}
+
+/* ---------- eventos ---------- */
+hospitalSelect.addEventListener('change', e => {
+  state.hospitalId = e.target.value || null;
+  state.selectedResultId = null;
+  runQuery();
+});
+
+document.getElementById('radius-select').addEventListener('change', e => {
+  document.getElementById('radius-custom').style.display = e.target.value === 'custom' ? 'block' : 'none';
+  runQuery();
+});
+document.getElementById('radius-custom').addEventListener('input', runQuery);
+
+document.querySelectorAll('.chip input').forEach(chk => {
+  chk.addEventListener('change', () => {
+    const cat = chk.dataset.cat;
+    if (chk.checked) state.categories.add(cat); else state.categories.delete(cat);
+    chk.closest('.chip').classList.toggle('active-' + cat, chk.checked);
+    runQuery();
+  });
+});
+
+document.getElementById('sort-distance').addEventListener('click', () => setSort('distance'));
+document.getElementById('sort-alpha').addEventListener('click', () => setSort('alpha'));
+function setSort(mode){
+  state.sortBy = mode;
+  document.getElementById('sort-distance').classList.toggle('active', mode === 'distance');
+  document.getElementById('sort-alpha').classList.toggle('active', mode === 'alpha');
+  runQuery();
+}
+
+/* estado inicial */
+runQuery();
+</script>
+</body>
+</html>
